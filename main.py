@@ -32,7 +32,7 @@ ERIVANDO_ALVES        = "1193239865"
 JURACI_JUNIOR         = "1508061048"
 AMANDA_RIBEIRO        = "9168146748"
 BIANCA_SILVA          = "1189409534"
-FABRICIO_CRUZ         = "" # ⚠️ Sem ID informado na lista
+FABRICIO_CRUZ         = "" 
 IROMAR_SOUZA          = "1461929762"
 DENER_QUIRINO         = "9327754351"
 DOUGLAS_FIALHO        = "1440989413"
@@ -61,7 +61,6 @@ CARLOS_OLIVEIRA       = "1172690482"
 # ==============================================================================
 # 📢 LISTA DE NOTIFICAÇÃO UNIFICADA
 # ==============================================================================
-# Lista bruta com todos os nomes
 LISTA_BRUTA = [
     ALVARO_GOMEZ_RUEDA, WELLINGTON_BRITO, JONATAS_TOMAZ, NICOLE_D_AMBROSI,
     ANSELMO_BENTO, FLAVIO_MOREIRA_JUNIOR, GUSTAVO_ARAUJO, CARLA_DE_CARLO,
@@ -74,18 +73,10 @@ LISTA_BRUTA = [
     RODRIGO_DONIZETTI, ALEX_RODRIGUES, CARLOS_CESAR_BIANCHINI, SYLVIO_NETTO,
     MARCELO_LUNADERLO, DANIELA_BRAZ, CARLOS_OLIVEIRA
 ]
-
-# Filtra para garantir que só existam IDs preenchidos (remove vazios como o do Fabricio Cruz)
 EQUIPE_COMPLETA = [uid for uid in LISTA_BRUTA if uid]
 
 # --- AUTENTICAÇÃO SEGURA ---
-def autenticar_google():
-    creds_var = os.environ.get('GSPREAD_CREDENTIALS') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
-    
-    if not creds_var:
-        print("❌ Erro: Credenciais não encontradas.")
-        return None
-
+def autenticar_google(creds_var):
     creds_dict = None
     try:
         creds_dict = json.loads(creds_var)
@@ -181,14 +172,45 @@ def enviar_webhook(mensagem, webhook_url, user_ids=None):
 
 # --- MAIN ---
 def main():
+    # --- DIAGNÓSTICO DE AMBIENTE ---
+    print("\n" + "="*40)
+    print("🕵️ INICIANDO DIAGNÓSTICO DE SEGREDOS")
+    print("="*40)
+    
+    # 1. Recupera Variáveis
     webhook_url = os.environ.get('WEBHOOK_URL') or os.environ.get('SEATALK_WEBHOOK_URL')
     spreadsheet_id = os.environ.get('SHEET_ID') or os.environ.get('SPREADSHEET_ID')
+    creds_var = os.environ.get('GSPREAD_CREDENTIALS') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 
-    if not webhook_url or not spreadsheet_id:
-        print("❌ Configurações ausentes.")
+    # 2. Verifica WEBHOOK
+    if webhook_url:
+        print(f"✅ WEBHOOK_URL: Encontrado (Tamanho: {len(webhook_url)} caracteres)")
+    else:
+        print("❌ WEBHOOK_URL: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
+
+    # 3. Verifica SHEET_ID
+    if spreadsheet_id:
+        print(f"✅ SHEET_ID: Encontrado (Valor: {spreadsheet_id})")
+        if "google.com" in spreadsheet_id:
+            print("⚠️ AVISO: Parece que você colou o LINK inteiro no SHEET_ID. Use apenas o código ID.")
+    else:
+        print("❌ SHEET_ID: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
+
+    # 4. Verifica CREDENCIAIS
+    if creds_var:
+        print(f"✅ GSPREAD_CREDENTIALS: Encontrado (Tamanho: {len(creds_var)} caracteres)")
+    else:
+        print("❌ GSPREAD_CREDENTIALS: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
+    
+    print("="*40 + "\n")
+
+    # Se faltar algo crítico, encerra aqui
+    if not webhook_url or not spreadsheet_id or not creds_var:
+        print("⛔ EXECUÇÃO INTERROMPIDA POR FALTA DE CONFIGURAÇÃO.")
         return
 
-    cliente = autenticar_google()
+    # --- EXECUÇÃO NORMAL ---
+    cliente = autenticar_google(creds_var)
     if not cliente: return
 
     print("🔎 Verificando planilha 'Reporte'...")
