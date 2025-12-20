@@ -3,7 +3,7 @@ import gspread
 import requests
 import base64
 import binascii
-import re # Importante para ler o texto "(15/12 a 20/12)"
+import re 
 from datetime import datetime, timedelta
 from pytz import timezone
 import os
@@ -91,7 +91,7 @@ def autenticar_google(creds_var):
         print(f"❌ Erro ao autenticar: {e}")
         return None
 
-# --- LÓGICA DO SAFETY WALK (COM REGEX NA COLUNA I) ---
+# --- LÓGICA DO SAFETY WALK ---
 def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
     if not cliente: return None, "Cliente não conectado."
 
@@ -104,10 +104,7 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
 
     if not todos_dados: return None, "Aba vazia."
 
-    # Cabeçalhos estão na Linha 1 (índice 0)
     header_nomes = todos_dados[0]
-    
-    # Dados começam na Linha 4 (índice 3)
     dados_operacionais = todos_dados[3:]
 
     hoje = datetime.now(FUSO_HORARIO_SP).date()
@@ -117,64 +114,54 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
     texto_semana = ""
     data_limite_str = ""
 
-    # Loop para encontrar a semana correta
     for i, linha in enumerate(dados_operacionais):
-        if not linha or len(linha) < 9: continue # Precisa ter pelo menos até a coluna I
+        if not linha or len(linha) < 9: continue
 
-        # 1. Pega o texto da Coluna I (Índice 8)
-        # Ex: "Sem 51 (15/12 a 20/12)"
+        # 1. Texto da Semana (Coluna I - Índice 8)
         texto_coluna_I = linha[8].strip()
         
-        # 2. Pega o ANO da Coluna C (Índice 2) - Na imagem é "Ano"
-        # Se preferir a Coluna D, mude para linha[3]
-        ano_str = linha[2].strip() 
+        # 2. CORREÇÃO: Pega o ANO da Coluna D (Índice 3)
+        ano_str = linha[3].strip() 
 
-        # 3. Usa REGEX para extrair as datas dentro dos parênteses
-        # Procura por: (dia/mes "a" dia/mes)
+        # 3. Extrai datas do texto "(15/12 a 20/12)"
         match = re.search(r'\((\d{2}/\d{2})\s*a\s*(\d{2}/\d{2})\)', texto_coluna_I)
 
         if match and ano_str.isdigit():
-            str_inicio = match.group(1) # Ex: 15/12
-            str_fim = match.group(2)    # Ex: 20/12
+            str_inicio = match.group(1)
+            str_fim = match.group(2)
             
             try:
-                # Monta as datas completas usando o Ano da coluna C
+                # Monta as datas completas com o ano da Coluna D
                 dt_inicio = datetime.strptime(f"{str_inicio}/{ano_str}", "%d/%m/%Y").date()
                 dt_fim = datetime.strptime(f"{str_fim}/{ano_str}", "%d/%m/%Y").date()
                 
-                # Ajuste para virada de ano (Ex: 28/12 a 03/01)
-                # Se o mês de fim for menor que o mês de início, soma 1 ano no fim
+                # Ajuste para virada de ano
                 if dt_fim.month < dt_inicio.month:
                     dt_fim = dt_fim.replace(year=dt_fim.year + 1)
 
-                # 4. Verifica se HOJE está dentro desse intervalo
+                # Verifica se hoje está no intervalo
                 if dt_inicio <= hoje <= dt_fim:
                     print(f"✅ Semana localizada na linha {i+4}: {texto_coluna_I}")
                     linha_encontrada = linha
                     texto_semana = texto_coluna_I
-                    data_limite_str = str_fim # Pega o "20/12" para exibir na mensagem
+                    data_limite_str = str_fim
                     break
             except ValueError as e:
                 print(f"⚠️ Erro ao converter data na linha {i+4}: {e}")
                 continue
-        else:
-            # Apenas debug para linhas que não batem o padrão (pode ignorar)
-            pass
 
     if not linha_encontrada:
         return None, f"Nenhuma semana ativa encontrada para a data de hoje ({hoje.strftime('%d/%m/%Y')}) baseada na Coluna I."
 
     pendencias = []
     
-    # 5. Verifica os status a partir da Coluna J (Índice 9)
-    # Na imagem: Coluna I é o texto da semana, Coluna J é o primeiro líder (Alvaro)
+    # 4. Verifica pendências da Coluna J em diante
     for i in range(9, len(linha_encontrada)):
         if i >= len(header_nomes): break 
         
         status = linha_encontrada[i]
         nome_lider = header_nomes[i]
         
-        # Pula colunas sem cabeçalho ou nomes vazios
         if not nome_lider: continue
         
         if status.strip().upper() == "NÃO REALIZADO":
