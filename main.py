@@ -3,21 +3,21 @@ import gspread
 import requests
 import base64
 import binascii
-from datetime import datetime
+import re # Importante para ler o texto "(15/12 a 20/12)"
+from datetime import datetime, timedelta
 from pytz import timezone
 import os
 import json
 import sys
 
-# --- CONSTANTES E CONFIGURAÇÕES ---
+# --- CONSTANTES ---
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 NOME_ABA = 'Reporte'
 FUSO_HORARIO_SP = timezone('America/Sao_Paulo')
 
 # ==============================================================================
-# 👥 CADASTRO DA EQUIPE (IDs DE QUEM RECEBE O ALERTA)
+# 👥 CADASTRO DA EQUIPE
 # ==============================================================================
-
 ALVARO_GOMEZ_RUEDA    = "1420090507"
 WELLINGTON_BRITO      = "1168182475"
 JONATAS_TOMAZ         = "1428232020"
@@ -58,9 +58,6 @@ MARCELO_LUNADERLO     = "9184928869"
 DANIELA_BRAZ          = "1453743924"
 CARLOS_OLIVEIRA       = "1172690482"
 
-# ==============================================================================
-# 📢 LISTA DE NOTIFICAÇÃO UNIFICADA
-# ==============================================================================
 LISTA_BRUTA = [
     ALVARO_GOMEZ_RUEDA, WELLINGTON_BRITO, JONATAS_TOMAZ, NICOLE_D_AMBROSI,
     ANSELMO_BENTO, FLAVIO_MOREIRA_JUNIOR, GUSTAVO_ARAUJO, CARLA_DE_CARLO,
@@ -75,28 +72,26 @@ LISTA_BRUTA = [
 ]
 EQUIPE_COMPLETA = [uid for uid in LISTA_BRUTA if uid]
 
-# --- AUTENTICAÇÃO SEGURA ---
+# --- AUTENTICAÇÃO ---
 def autenticar_google(creds_var):
     creds_dict = None
     try:
         creds_dict = json.loads(creds_var)
     except json.JSONDecodeError:
         try:
-            print("🔐 Detectado formato codificado. Decodificando Base64...")
             decoded_bytes = base64.b64decode(creds_var, validate=True)
             decoded_str = decoded_bytes.decode("utf-8")
             creds_dict = json.loads(decoded_str)
         except Exception as e:
             print(f"❌ Erro Crítico nas credenciais: {e}")
             return None
-
     try:
         return gspread.service_account_from_dict(creds_dict, scopes=SCOPES)
     except Exception as e:
-        print(f"❌ Erro ao autenticar no Google: {e}")
+        print(f"❌ Erro ao autenticar: {e}")
         return None
 
-# --- LÓGICA DO SAFETY WALK ---
+# --- LÓGICA DO SAFETY WALK (COM REGEX NA COLUNA I) ---
 def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
     if not cliente: return None, "Cliente não conectado."
 
@@ -109,37 +104,79 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
 
     if not todos_dados: return None, "Aba vazia."
 
-    header_nomes = todos_dados[0] 
+    # Cabeçalhos estão na Linha 1 (índice 0)
+    header_nomes = todos_dados[0]
+    
+    # Dados começam na Linha 4 (índice 3)
     dados_operacionais = todos_dados[3:]
 
     hoje = datetime.now(FUSO_HORARIO_SP).date()
+    print(f"📅 Hoje é: {hoje.strftime('%d/%m/%Y')}")
 
     linha_encontrada = None
     texto_semana = ""
     data_limite_str = ""
 
-    for linha in dados_operacionais:
-        try:
-            if not linha[0] or not linha[1]: continue
-            dt_inicio = datetime.strptime(linha[0], "%d/%m/%Y").date()
-            dt_fim = datetime.strptime(linha[1], "%d/%m/%Y").date()
+    # Loop para encontrar a semana correta
+    for i, linha in enumerate(dados_operacionais):
+        if not linha or len(linha) < 9: continue # Precisa ter pelo menos até a coluna I
+
+        # 1. Pega o texto da Coluna I (Índice 8)
+        # Ex: "Sem 51 (15/12 a 20/12)"
+        texto_coluna_I = linha[8].strip()
+        
+        # 2. Pega o ANO da Coluna C (Índice 2) - Na imagem é "Ano"
+        # Se preferir a Coluna D, mude para linha[3]
+        ano_str = linha[2].strip() 
+
+        # 3. Usa REGEX para extrair as datas dentro dos parênteses
+        # Procura por: (dia/mes "a" dia/mes)
+        match = re.search(r'\((\d{2}/\d{2})\s*a\s*(\d{2}/\d{2})\)', texto_coluna_I)
+
+        if match and ano_str.isdigit():
+            str_inicio = match.group(1) # Ex: 15/12
+            str_fim = match.group(2)    # Ex: 20/12
             
-            if dt_inicio <= hoje <= dt_fim:
-                linha_encontrada = linha
-                texto_semana = linha[8]
-                data_limite_str = dt_fim.strftime("%d/%m")
-                break
-        except ValueError:
-            continue
+            try:
+                # Monta as datas completas usando o Ano da coluna C
+                dt_inicio = datetime.strptime(f"{str_inicio}/{ano_str}", "%d/%m/%Y").date()
+                dt_fim = datetime.strptime(f"{str_fim}/{ano_str}", "%d/%m/%Y").date()
+                
+                # Ajuste para virada de ano (Ex: 28/12 a 03/01)
+                # Se o mês de fim for menor que o mês de início, soma 1 ano no fim
+                if dt_fim.month < dt_inicio.month:
+                    dt_fim = dt_fim.replace(year=dt_fim.year + 1)
+
+                # 4. Verifica se HOJE está dentro desse intervalo
+                if dt_inicio <= hoje <= dt_fim:
+                    print(f"✅ Semana localizada na linha {i+4}: {texto_coluna_I}")
+                    linha_encontrada = linha
+                    texto_semana = texto_coluna_I
+                    data_limite_str = str_fim # Pega o "20/12" para exibir na mensagem
+                    break
+            except ValueError as e:
+                print(f"⚠️ Erro ao converter data na linha {i+4}: {e}")
+                continue
+        else:
+            # Apenas debug para linhas que não batem o padrão (pode ignorar)
+            pass
 
     if not linha_encontrada:
-        return None, f"Nenhum registro encontrado para a data {hoje.strftime('%d/%m/%Y')}."
+        return None, f"Nenhuma semana ativa encontrada para a data de hoje ({hoje.strftime('%d/%m/%Y')}) baseada na Coluna I."
 
     pendencias = []
+    
+    # 5. Verifica os status a partir da Coluna J (Índice 9)
+    # Na imagem: Coluna I é o texto da semana, Coluna J é o primeiro líder (Alvaro)
     for i in range(9, len(linha_encontrada)):
         if i >= len(header_nomes): break 
+        
         status = linha_encontrada[i]
         nome_lider = header_nomes[i]
+        
+        # Pula colunas sem cabeçalho ou nomes vazios
+        if not nome_lider: continue
+        
         if status.strip().upper() == "NÃO REALIZADO":
             pendencias.append(f"❌ {nome_lider}")
 
@@ -152,9 +189,7 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
 
 # --- ENVIO WEBHOOK ---
 def enviar_webhook(mensagem, webhook_url, user_ids=None):
-    if not webhook_url: 
-        print("❌ URL do Webhook não definida.")
-        return
+    if not webhook_url: return
 
     payload = {
         "tag": "text",
@@ -172,44 +207,14 @@ def enviar_webhook(mensagem, webhook_url, user_ids=None):
 
 # --- MAIN ---
 def main():
-    # --- DIAGNÓSTICO DE AMBIENTE ---
-    print("\n" + "="*40)
-    print("🕵️ INICIANDO DIAGNÓSTICO DE SEGREDOS")
-    print("="*40)
-    
-    # 1. Recupera Variáveis
     webhook_url = os.environ.get('WEBHOOK_URL') or os.environ.get('SEATALK_WEBHOOK_URL')
     spreadsheet_id = os.environ.get('SHEET_ID') or os.environ.get('SPREADSHEET_ID')
     creds_var = os.environ.get('GSPREAD_CREDENTIALS') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 
-    # 2. Verifica WEBHOOK
-    if webhook_url:
-        print(f"✅ WEBHOOK_URL: Encontrado (Tamanho: {len(webhook_url)} caracteres)")
-    else:
-        print("❌ WEBHOOK_URL: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
-
-    # 3. Verifica SHEET_ID
-    if spreadsheet_id:
-        print(f"✅ SHEET_ID: Encontrado (Valor: {spreadsheet_id})")
-        if "google.com" in spreadsheet_id:
-            print("⚠️ AVISO: Parece que você colou o LINK inteiro no SHEET_ID. Use apenas o código ID.")
-    else:
-        print("❌ SHEET_ID: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
-
-    # 4. Verifica CREDENCIAIS
-    if creds_var:
-        print(f"✅ GSPREAD_CREDENTIALS: Encontrado (Tamanho: {len(creds_var)} caracteres)")
-    else:
-        print("❌ GSPREAD_CREDENTIALS: NÃO ENCONTRADO! Verifique o nome do segredo no GitHub.")
-    
-    print("="*40 + "\n")
-
-    # Se faltar algo crítico, encerra aqui
     if not webhook_url or not spreadsheet_id or not creds_var:
-        print("⛔ EXECUÇÃO INTERROMPIDA POR FALTA DE CONFIGURAÇÃO.")
+        print("⛔ Configurações ausentes.")
         return
 
-    # --- EXECUÇÃO NORMAL ---
     cliente = autenticar_google(creds_var)
     if not cliente: return
 
@@ -232,7 +237,7 @@ def main():
         print(f"🚀 Enviando alerta para {len(EQUIPE_COMPLETA)} pessoas...")
         enviar_webhook(mensagem_final, webhook_url, user_ids=EQUIPE_COMPLETA)
     else:
-        print("✅ Tudo certo! Nenhuma pendência encontrada.")
+        print(f"✅ Tudo certo! Nenhuma pendência encontrada na semana {resultado['semana'] if resultado else 'Atual'}.")
 
 if __name__ == "__main__":
     main()
