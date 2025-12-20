@@ -2,16 +2,8 @@ name: Reporte Safety Walk
 
 on:
   schedule:
-    # Agendamento 1: 07:00 e 15:00 (Brasil) de Seg a Sáb
-    # Em UTC: 10:00 e 18:00 de Seg(1) a Sáb(6)
     - cron: '0 10,18 * * 1-6'
-    
-    # Agendamento 2: 23:00 (Brasil) de Seg a Sáb
-    # Em UTC: 02:00 de Ter(2) a Dom(0)
-    # Isso cobre a noite de segunda (02h terça) até a noite de sábado (02h domingo)
     - cron: '0 2 * * 0,2-6'
-
-  # Permite rodar manualmente para testes
   workflow_dispatch:
 
 jobs:
@@ -32,9 +24,10 @@ jobs:
           pip install pandas gspread requests pytz
 
       - name: Executar Script
+        # AQUI ESTÁ A CORREÇÃO:
+        # Agora estamos pegando os segredos EXATAMENTE como você os nomeou
         env:
-          # OBS: Certifique-se que os nomes das Secrets no GitHub estão iguais a estes
-          GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GSPREAD_CREDENTIALS: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          WEBHOOK_URL: ${{ secrets.SEATALK_WEBHOOK_URL }}
+          SHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python main.py
