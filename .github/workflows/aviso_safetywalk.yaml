@@ -1,0 +1,40 @@
+name: Reporte Safety Walk
+
+on:
+  schedule:
+    # Agendamento 1: 07:00 e 15:00 (Brasil) de Seg a Sáb
+    # Em UTC: 10:00 e 18:00 de Seg(1) a Sáb(6)
+    - cron: '0 10,18 * * 1-6'
+    
+    # Agendamento 2: 23:00 (Brasil) de Seg a Sáb
+    # Em UTC: 02:00 de Ter(2) a Dom(0)
+    # Isso cobre a noite de segunda (02h terça) até a noite de sábado (02h domingo)
+    - cron: '0 2 * * 0,2-6'
+
+  # Permite rodar manualmente para testes
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar código do repositório
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependências
+        run: |
+          pip install pandas gspread requests pytz
+
+      - name: Executar Script
+        env:
+          # OBS: Certifique-se que os nomes das Secrets no GitHub estão iguais a estes
+          GSPREAD_CREDENTIALS: ${{ secrets.GSPREAD_CREDENTIALS }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python main.py
