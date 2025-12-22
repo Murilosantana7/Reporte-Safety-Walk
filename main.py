@@ -119,13 +119,19 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
     pendencias_nomes = []
     ids_para_marcar = []
 
+    # O robô percorre os nomes a partir da coluna J (índice 9)
     for i in range(9, len(linha_ativa)):
         if i >= len(header_nomes): break
+        
         status = linha_ativa[i].strip().upper()
         nome_coluna = header_nomes[i]
         
+        # SÓ ENTRA NA LISTA SE FOR "NÃO REALIZADO"
+        # Se estiver em branco (férias), o código pula para o próximo
         if status == "NÃO REALIZADO":
             pendencias_nomes.append(f"❌ {nome_coluna}")
+            
+            # Tenta encontrar o ID do SeaTalk para este nome
             user_id = MAPEAMENTO_EQUIPE.get(nome_coluna.upper())
             if user_id:
                 ids_para_marcar.append(user_id)
@@ -145,11 +151,13 @@ def enviar_webhook(mensagem, webhook_url, user_ids=None):
         "tag": "text",
         "text": { "format": 1, "content": mensagem }
     }
+    # Só adiciona a lista de menções se houver IDs pendentes
     if user_ids:
         payload["text"]["mentioned_list"] = user_ids
+
     try:
         requests.post(webhook_url, json=payload).raise_for_status()
-        print("✅ Notificação enviada.")
+        print(f"✅ Notificação enviada para {len(user_ids)} colaboradores.")
     except Exception as e:
         print(f"❌ Erro Webhook: {e}")
 
@@ -160,7 +168,7 @@ def main():
     creds_var = os.environ.get('GSPREAD_CREDENTIALS') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 
     if not all([webhook_url, sheet_id, creds_var]):
-        print("⛔ Variáveis de ambiente faltando.")
+        print("⛔ Variáveis de ambiente faltando (Webhook, Sheet ID ou Credenciais).")
         return
 
     cliente = autenticar_google(creds_var)
@@ -181,7 +189,7 @@ def main():
         )
         enviar_webhook(msg, webhook_url, user_ids=resultado['ids'])
     else:
-        print("✅ Nenhuma pendência encontrada.")
+        print("✅ Tudo certo! Nenhuma pendência de Safety Walk para hoje.")
 
 if __name__ == "__main__":
     main()
