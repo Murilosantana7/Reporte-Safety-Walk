@@ -1,9 +1,13 @@
 name: Reporte Safety Walk
 
+# Define quando o script será executado
 on:
   schedule:
-    - cron: '0 10,18 * * 1-6'
-    - cron: '0 2 * * 0,2-6'
+    # 09:00 UTC = 06:00 AM Horário de Brasília (UTC-3)
+    # O formato é: 'minuto hora dia mes dia-da-semana'
+    - cron: '0 9 * * *'
+  
+  # Permite rodar manualmente pela aba "Actions" no GitHub
   workflow_dispatch:
 
 jobs:
@@ -11,22 +15,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Copia os arquivos do seu repositório para o servidor do GitHub
       - name: Baixar código do repositório
         uses: actions/checkout@v3
 
+      # 2. Instala o Python na máquina virtual
       - name: Configurar Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
+      # 3. Instala as bibliotecas necessárias para o seu script funcionar
       - name: Instalar dependências
         run: |
           pip install pandas gspread requests pytz
 
+      # 4. Executa o seu script Python injetando as chaves de segurança
       - name: Executar Script
-        # AQUI ESTÁ A CORREÇÃO:
-        # Agora estamos pegando os segredos EXATAMENTE como você os nomeou
         env:
+          # Estas variáveis devem estar configuradas em Settings > Secrets do seu GitHub
           GSPREAD_CREDENTIALS: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           WEBHOOK_URL: ${{ secrets.SEATALK_WEBHOOK_URL }}
           SHEET_ID: ${{ secrets.SPREADSHEET_ID }}
