@@ -181,7 +181,7 @@ def main():
 
     if resultado["qtd"] > 0:
         msg = (
-            f"⚠️ **Safety Walk Pendente**\n\n"
+            f"⚠️ **Safety Walk Pendente** ⚠️\n\n"
             f"📅 Período: {resultado['semana']}\n"
             f"❗ {resultado['qtd']} colaboradores pendentes:\n\n"
             f"{resultado['lista_formatada']}\n\n"
