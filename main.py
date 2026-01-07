@@ -8,15 +8,32 @@ from pytz import timezone
 import os
 import json
 
-# --- CONSTANTES ---
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-NOME_ABA = 'Reporte'
-FUSO_HORARIO_SP = timezone('America/Sao_Paulo')
+# ==============================================================================
+# ⚙️ CONFIGURAÇÃO DE LAYOUT (LIMITADO DAS LINHAS 6 A 57)
+# ==============================================================================
 
+# 1. LIMITES DE LINHAS (Python começa do 0. Linha 6 Excel = Índice 5)
+INDICE_LINHA_CABECALHO = 0       # Linha 1: Onde estão os nomes (Alvaro, Wellington...)
+INDICE_LINHA_INICIO = 5          # Linha 6: Início da busca
+INDICE_LINHA_FIM = 57            # Linha 57: Fim da busca (O Python exclui o último número, então vai até 57)
+
+# 2. COLUNAS (A=0, B=1 ... J=9 ... N=13)
+INDICE_COLUNA_PILAR = 1          # Coluna B: "Safety Walk"
+INDICE_COLUNA_DATA = 9           # Coluna J: "Sem 02 (05/01 a 10/01)"
+INDICE_INICIO_COLUNAS_NOMES = 13 # Coluna N: Primeiro nome (Alvaro)
+
+# 3. FILTRO
+PILAR_ALVO = "Safety Walk"       # Texto para confirmar se é a linha certa
+
+# 4. GERAIS
+NOME_ABA = 'Reporte'
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+FUSO_HORARIO_SP = timezone('America/Sao_Paulo')
 # ==============================================================================
-# 👥 CADASTRO E MAPEAMENTO DA EQUIPE (Nome na Planilha : ID SeaTalk)
-# ==============================================================================
+
+# 👥 CADASTRO DA EQUIPE (Preencha os IDs que faltam)
 MAPEAMENTO_EQUIPE = {
+    "ALVARO GOMEZ RUEDA": "",
     "WELLINGTON BRITO": "1168182475",
     "JONATAS TOMAZ": "1428232020",
     "NICOLE D AMBROSI": "1197681528",
@@ -59,7 +76,6 @@ MAPEAMENTO_EQUIPE = {
     "EDILENE AUGUSTO": "1185463777",
 }
 
-# --- AUTENTICAÇÃO ---
 def autenticar_google(creds_var):
     try:
         try:
@@ -72,7 +88,6 @@ def autenticar_google(creds_var):
         print(f"❌ Erro na autenticação Google: {e}")
         return None
 
-# --- LÓGICA DO SAFETY WALK ---
 def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
     if not cliente: return None, "Cliente não conectado."
     try:
@@ -84,56 +99,79 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
 
     if not todos_dados: return None, "Aba vazia."
 
-    header_nomes = [h.strip() for h in todos_dados[0]]
-    dados_operacionais = todos_dados[3:]
+    try:
+        header_nomes = [h.strip() for h in todos_dados[INDICE_LINHA_CABECALHO]]
+        
+        # --- CORTE EXATO: LINHAS 6 A 57 ---
+        # O Python usa fatiamento [inicio : fim], onde o fim não é incluído.
+        # Linha 6 = índice 5. Linha 57 = índice 56. Para incluir a 57, usamos 57 no slice.
+        dados_operacionais = todos_dados[INDICE_LINHA_INICIO : INDICE_LINHA_FIM]
+        
+    except IndexError:
+        return None, "Erro de Índice: A planilha tem menos linhas do que o configurado."
 
     hoje = datetime.now(FUSO_HORARIO_SP).date()
-    print(f"📅 Hoje: {hoje.strftime('%d/%m/%Y')}")
+    # Debug: Para testar, descomente e mude a data:
+    # hoje = datetime(2025, 1, 7).date() 
+    
+    print(f"📅 Data Base: {hoje.strftime('%d/%m/%Y')}")
 
     linha_ativa = None
     texto_semana = ""
     data_limite_str = ""
 
-    for i, linha in enumerate(dados_operacionais):
-        if len(linha) < 9: continue
-        texto_col_I = linha[8].strip()
-        ano_str = linha[3].strip()
-        match = re.search(r'\((\d{2}/\d{2})\s*a\s*(\d{2}/\d{2})\)', texto_col_I)
+    # --- VARREDURA NO INTERVALO ESPECÍFICO ---
+    for linha in dados_operacionais:
+        if len(linha) <= INDICE_INICIO_COLUNAS_NOMES: continue
+        
+        # 1. Checa Pilar (Coluna B)
+        pilar_atual = linha[INDICE_COLUNA_PILAR].strip()
+        if PILAR_ALVO.lower() not in pilar_atual.lower():
+            continue 
 
-        if match and ano_str.isdigit():
+        # 2. Checa Data (Coluna J)
+        texto_data = linha[INDICE_COLUNA_DATA].strip()
+        datas_encontradas = re.findall(r'(\d{1,2}/\d{1,2})', texto_data)
+        
+        if len(datas_encontradas) >= 2:
             try:
-                dt_fim = datetime.strptime(f"{match.group(2)}/{ano_str}", "%d/%m/%Y").date()
-                dt_ini = datetime.strptime(f"{match.group(1)}/{ano_str}", "%d/%m/%Y").date()
+                ano_atual = hoje.year
+                dt_ini = datetime.strptime(f"{datas_encontradas[0]}/{ano_atual}", "%d/%m/%Y").date()
+                dt_fim = datetime.strptime(f"{datas_encontradas[1]}/{ano_atual}", "%d/%m/%Y").date()
+                
+                # Ajuste de virada de ano
                 if dt_fim.month < dt_ini.month:
-                    dt_fim = dt_fim.replace(year=dt_fim.year + 1)
+                    dt_fim = dt_fim.replace(year=ano_atual + 1)
+                
+                # Validação
                 if dt_ini <= hoje <= dt_fim:
+                    print(f"✅ Encontrado na linha: {pilar_atual} | {texto_data}")
                     linha_ativa = linha
-                    texto_semana = texto_col_I
-                    data_limite_str = match.group(2)
+                    texto_semana = texto_data
+                    data_limite_str = datas_encontradas[1]
                     break
-            except ValueError: continue
+            except ValueError:
+                continue
 
     if not linha_ativa:
-        return None, "Nenhuma semana ativa encontrada para hoje."
+        return None, "Nenhuma linha de 'Safety Walk' encontrada para hoje neste intervalo."
 
     pendencias_nomes = []
     ids_para_marcar = []
 
-    # O robô percorre os nomes a partir da coluna J (índice 9)
-    for i in range(9, len(linha_ativa)):
+    # --- VERIFICAÇÃO DE PENDÊNCIAS ---
+    for i in range(INDICE_INICIO_COLUNAS_NOMES, len(linha_ativa)):
         if i >= len(header_nomes): break
         
         status = linha_ativa[i].strip().upper()
-        nome_coluna = header_nomes[i]
+        nome_lider = header_nomes[i].strip()
         
-        # SÓ ENTRA NA LISTA SE FOR "NÃO REALIZADO"
-        # Se estiver em branco (férias), o código pula para o próximo
+        if not nome_lider: continue
+
         if status == "NÃO REALIZADO":
-            pendencias_nomes.append(f"❌ {nome_coluna}")
-            
-            # Tenta encontrar o ID do SeaTalk para este nome
-            user_id = MAPEAMENTO_EQUIPE.get(nome_coluna.upper())
-            if user_id:
+            pendencias_nomes.append(f"❌ {nome_lider}")
+            user_id = MAPEAMENTO_EQUIPE.get(nome_lider.upper())
+            if user_id and user_id not in ids_para_marcar:
                 ids_para_marcar.append(user_id)
 
     return {
@@ -144,31 +182,27 @@ def buscar_pendencias_safety_walk(cliente, spreadsheet_id):
         "qtd": len(pendencias_nomes)
     }, None
 
-# --- ENVIO WEBHOOK ---
 def enviar_webhook(mensagem, webhook_url, user_ids=None):
     if not webhook_url: return
     payload = {
         "tag": "text",
         "text": { "format": 1, "content": mensagem }
     }
-    # Só adiciona a lista de menções se houver IDs pendentes
-    if user_ids:
-        payload["text"]["mentioned_list"] = user_ids
-
+    if user_ids: payload["text"]["mentioned_list"] = user_ids
+    
     try:
         requests.post(webhook_url, json=payload).raise_for_status()
-        print(f"✅ Notificação enviada para {len(user_ids)} colaboradores.")
+        print(f"✅ Notificação enviada para {len(user_ids) if user_ids else 0} pessoas.")
     except Exception as e:
         print(f"❌ Erro Webhook: {e}")
 
-# --- EXECUÇÃO PRINCIPAL ---
 def main():
     webhook_url = os.environ.get('WEBHOOK_URL') or os.environ.get('SEATALK_WEBHOOK_URL')
     sheet_id = os.environ.get('SHEET_ID') or os.environ.get('SPREADSHEET_ID')
     creds_var = os.environ.get('GSPREAD_CREDENTIALS') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 
     if not all([webhook_url, sheet_id, creds_var]):
-        print("⛔ Variáveis de ambiente faltando (Webhook, Sheet ID ou Credenciais).")
+        print("⛔ Variáveis de ambiente faltando.")
         return
 
     cliente = autenticar_google(creds_var)
@@ -189,7 +223,7 @@ def main():
         )
         enviar_webhook(msg, webhook_url, user_ids=resultado['ids'])
     else:
-        print("✅ Tudo certo! Nenhuma pendência de Safety Walk para hoje.")
+        print("✅ Tudo certo! Nenhuma pendência encontrada.")
 
 if __name__ == "__main__":
     main()
