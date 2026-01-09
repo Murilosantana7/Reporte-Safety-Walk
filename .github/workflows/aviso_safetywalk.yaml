@@ -2,10 +2,10 @@ name: Reporte Safety Walk
 
 # Define quando o script será executado
 on:
-  schedule:
+#  schedule:
     # 09:00 UTC = 06:00 AM Horário de Brasília (UTC-3)
     # O formato é: 'minuto hora dia mes dia-da-semana'
-    - cron: '0 9 * * *'
+  #  - cron: '0 9 * * *'
   
   # Permite rodar manualmente pela aba "Actions" no GitHub
   workflow_dispatch:
